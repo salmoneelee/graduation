@@ -1,0 +1,4 @@
+Boundary condition (zero = vacuum, one = reflective): 0
+Number of neutrons: 100000
+Total number of inactivecycles: 50
+Total number of active cycles: 250
