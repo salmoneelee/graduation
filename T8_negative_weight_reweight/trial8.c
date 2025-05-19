@@ -24,6 +24,7 @@ int main() {
     const char *filename2 = "text_data_8.txt"; // File for storing data of each cycle
     const char *filename3 = "position_data_8.txt"; // File for storing neutron position data
     const char *filename4 = "reweight_bank_8.txt"; // File for storing reweight data of the child fission bank 
+    const char *filename5 = "k_data_8.txt"; // File for storing k data of each cycle
 
     // Register cleanup function
     atexit(cleanup); 
@@ -34,7 +35,8 @@ int main() {
     FILE *file2 = fopen(filename2, "w");
     FILE *file3 = fopen(filename3, "w");
     FILE *file4 = fopen(filename4, "w");
-    if(input_file == NULL || file1 == NULL || file2 == NULL || file3 == NULL || file4 == NULL) {
+    FILE *file5 = fopen(filename5, "w");
+    if(input_file == NULL || file1 == NULL || file2 == NULL || file3 == NULL || file4 == NULL || file5 == NULL) {
         printf("Unable to open files.\n");
         exit(EXIT_FAILURE); // Terminate program immediatedly
     }
@@ -42,6 +44,7 @@ int main() {
     register_pointer(file2, TYPE_FILE);
     register_pointer(file3, TYPE_FILE);
     register_pointer(file4, TYPE_FILE);
+    register_pointer(file5, TYPE_FILE);
 
     // Read input_file
     char buffer[100]; // Buffer to store each line read from the file 
@@ -234,6 +237,9 @@ int main() {
         for (int i = 1; i < child_neutron + 1; i++) {
             fprintf(file3, "%d %0.10f %0.10f\n", i, child_fission_bank[i].position, child_fission_bank[i].weight); 
         }
+
+        // Log k value 
+        fprintf(file5, "%f\n", k_cycle);
         // Debug End
 
         // Accumulate k value only for active cycles
@@ -326,7 +332,8 @@ int main() {
     fprintf(file2, "k1=%f, k2=%f, k2/k1=%f\n", k1, k2, k2/k1);
     printf("k_a=%f, k_sa=%f, std=%f\n", k_average, k_squared_average, k_sample_standard_deviation);
     printf("k1=%f, k2=%f, k2/k1=%f\n\n", k1, k2, k2/k1);
-   // Debug End
+    printf("E=%f\n", 3*(sigma_c + sigma_f + sigma_s) * (((1/k_average)*nu*sigma_f) - (sigma_c + sigma_f))); // h_bar**2/(2*m) = 1 assumed
+    // Debug End
 
     // Cleanup
     return 0;
