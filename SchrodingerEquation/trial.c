@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <gsl/gsl_vector.h>
-#include "trial8.h"
+#include "trial.h"
 #include <math.h>
 #include <time.h>
 
@@ -19,12 +19,12 @@ int main() {
     double k1; // Theoretical eigenvalue for the first harmonic mode 
     double k2; // Theoretical eigenvalue for the second harmonic mode
     
-    const char *input = "input_8.txt"; // File for reading the inputs
-    const char *filename1 = "flux_data_8.txt"; // File for storing neutron flux data
-    const char *filename2 = "text_data_8.txt"; // File for storing data of each cycle
-    const char *filename3 = "position_data_8.txt"; // File for storing neutron position data
-    const char *filename4 = "reweight_bank_8.txt"; // File for storing reweight data of the child fission bank 
-    const char *filename5 = "k_data_8.txt"; // File for storing k data of each cycle
+    const char *input = "input.txt"; // File for reading the inputs
+    const char *filename1 = "flux_data.txt"; // File for storing neutron flux data
+    const char *filename2 = "text_data.txt"; // File for storing data of each cycle
+    const char *filename3 = "position_data.txt"; // File for storing neutron position data
+    const char *filename4 = "reweight_bank.txt"; // File for storing reweight data of the child fission bank 
+    const char *filename5 = "k_data.txt"; // File for storing k data of each cycle
 
     // Register cleanup function
     atexit(cleanup); 
@@ -56,9 +56,37 @@ int main() {
     sscanf(buffer, "%*[^0-9]%d", &inactive_cycle);
     fgets(buffer, sizeof(buffer), input_file);
     sscanf(buffer, "%*[^0-9]%d", &active_cycle);
+    fgets(buffer, sizeof(buffer), input_file);
+    sscanf(buffer, "%*[^0-9]%f", &particle_mass);  ???????????????????
+    fgets(buffer, sizeof(buffer), input_file); ?????????????????????/
+    sscanf(buffer, "%*[^0-9]%f", &sigma_a);  ???????????????????????
 
     // Close input_file
     fclose(input_file); // close input_file
+
+    // Check the particle mass ???????????????????????????
+    while (particle_mass <= 0) {
+        printf("Enter the particle mass (must be the real mass in kg): ");
+        if (scanf("%d", &particle_mass) != 1 || particle_mass <= 0) { 
+            printf("Invalid input. The particle mass must be greater than 0.\n");
+            while (getchar() != '\n'); // Clear input buffer by reading and removing characters until a newline is encountered
+        } else {
+            break; // Valid input, exit loop
+        }
+    }
+
+    // Initialize cross sections ????????????????????????????
+    D = h_bar*h_bar/(2*particle_mass);
+    sigma_t = 1/(3*D);
+    sigma_s = sigma_t - sigma_a;
+    sigma_f = 0.0;
+    sigma_c = sigma_a - sigma_f;
+
+    // Check the values of the cross sections ?????????????????????????
+    if (sigma_t <=0 || sigma_f <= 0 || sigma_c <= 0 || sigma_s <= 0) {
+        printf("Invalid cross sections.\n");
+
+    }
 
     // Calculate the theoretical eigenvalues for the first and second harmonic modes
     if (boundary_condition == 0) { // Vacuum (flux zero)
@@ -327,14 +355,13 @@ int main() {
         fprintf(file1, "%f %g\n", (width/(2.0*num_bins))+i*(width/num_bins), gsl_vector_get(neutron_flux_squared_sum, i)); // write the index and value
     }
     
-    double B = 3*(sigma_f + sigma_c + sigma_s) * ((1/k_average) * nu * sigma_f - (sigma_c+sigma_f));
-    
     // Log mean and standard deviation of k, theoretical k values for the first and second harmonic modes
     fprintf(file2, "k_a=%f, k_sa=%f, std=%f\n", k_average, k_squared_average, k_sample_standard_deviation);
     fprintf(file2, "k1=%f, k2=%f, k2/k1=%f\n", k1, k2, k2/k1);
     printf("Computed values: k_a=%f, k_sa=%f, std=%f\n", k_average, k_squared_average, k_sample_standard_deviation);
     printf("Theoritcal values: k1=%f, k2=%f, k2/k1=%f\n\n", k1, k2, k2/k1);
-    printf("B=%f\n",B);
+    printf("Computed value: E=%f\n", sigma_f*nu/k_average);
+    printf("Theoritcal value: E=%f\n", (nu*sigma_f/k_average)-(sigma_c+sigma_f)); // inifinite potential well case
     // Debug End
 
     // Cleanup
