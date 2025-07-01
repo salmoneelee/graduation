@@ -1,4 +1,4 @@
-# Undergraduate Thesis Repository
+# Undergraduate Thesis
 
 This repository contains code developed for my undergraduate thesis at the Department of Physics, Sungkyunkwan University (SKKU).
 
