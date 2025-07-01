@@ -3,6 +3,7 @@
 #include <time.h>
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_vector.h>
+#include <gsl/gsl_matrix.h>
 #include "trial.h"
 #include <math.h>
 #include <string.h>
@@ -71,6 +72,9 @@ void unregister_pointer(void *ptr) {
                     break;
                 case TYPE_GSL_VECTOR:
                     gsl_vector_free((gsl_vector *)ptr);
+                    break;
+                case TYPE_GSL_MATRIX:
+                    gsl_matrix_free((gsl_matrix *)ptr);
                     break;
                 case TYPE_RNG:
                     free_rng();
@@ -191,7 +195,7 @@ void sum_of_weights(neutron *fission_bank, double *total_weight_pointer, int neu
 }
 
 // Simulate neutron diffusion for one cycle
-gsl_vector *simulate_neutron_diffusion(neutron *parent_fission_bank, neutron **child_fission_bank_double_pointer, double *k_pointer, double k) {
+gsl_vector *simulate_neutron_diffusion(FILE* file2, neutron *parent_fission_bank, neutron **child_fission_bank_double_pointer, double *k_pointer, double k, gsl_matrix *A) {
     gsl_vector *flux = gsl_vector_calloc(num_bins); 
     if (flux == NULL) {
         printf("Memory allocation for flux failed.\n");
@@ -199,14 +203,22 @@ gsl_vector *simulate_neutron_diffusion(neutron *parent_fission_bank, neutron **c
     }
 
     while (parent_fission_bank[parent_neutron].position != -1.0) {
+        double initial_position = parent_fission_bank[parent_neutron].position;
         double distance = determine_direction_and_distance(); // Distance to the next collision
         double new_position = parent_fission_bank[parent_neutron].position + distance;  // New position for the neutron
         parent_fission_bank[parent_neutron].position = new_position;
 
+        // Debug Start: Logging simulation step
+        fprintf(file2, "---- simulating neutron# %d ----\n ", parent_neutron);
+        fprintf(file2, "weight: %f, pos: %f, dis: %f, ", parent_fission_bank[parent_neutron].weight, initial_position, distance);
+        // Debug End
+
         int fission_neutrons = 0; // Number of neutrons produced by fission
         double child_weight = k; // Weight of child neutron
         if (new_position < width && new_position > 0) {
-            fission(parent_fission_bank, &fission_neutrons, k); // Number of neutrons produced by fission
+            fprintf(file2, "newpos: %f\n", new_position);
+
+            fission(file2, parent_fission_bank, &fission_neutrons, k); // Number of neutrons produced by fission
             if (parent_fission_bank[parent_neutron].weight < 0) {
                 child_weight = -k; 
             }
@@ -214,6 +226,7 @@ gsl_vector *simulate_neutron_diffusion(neutron *parent_fission_bank, neutron **c
             
             k_tally(k_pointer, parent_fission_bank);
             flux_tally(flux, parent_fission_bank, new_position);
+            matrix_tally(child_weight, fission_neutrons, A, new_position, initial_position);
         
             force_scattering(parent_fission_bank);
             russian_roulette(parent_fission_bank);
@@ -238,6 +251,7 @@ gsl_vector *simulate_neutron_diffusion(neutron *parent_fission_bank, neutron **c
             }
 
             parent_fission_bank[parent_neutron].position = new_position;
+            fprintf(file2, "newpos: %f\n", new_position);
 
             if (boundary_condition == 0) { // Vacuum
                 parent_fission_bank[parent_neutron].weight *= -1; // Negative weight neutron
@@ -246,16 +260,27 @@ gsl_vector *simulate_neutron_diffusion(neutron *parent_fission_bank, neutron **c
                 }
             }
 
-            fission(parent_fission_bank, &fission_neutrons, k); 
+            fission(file2, parent_fission_bank, &fission_neutrons, k); 
             add_fission_bank(child_weight, fission_neutrons, child_fission_bank_double_pointer, new_position);
             
             k_tally(k_pointer, parent_fission_bank);
             flux_tally(flux, parent_fission_bank, new_position);
+            matrix_tally(child_weight, fission_neutrons, A, new_position, initial_position);
         
             force_scattering(parent_fission_bank);
             russian_roulette(parent_fission_bank);
         }
     }
+
+    // Tally the positions of child neutrons into child_position_vector
+    gsl_vector *child_position_vector = gsl_vector_calloc(num_bins);
+    if (child_position_vector == NULL) {
+        printf("Memory allocation for child position vector failed.\n");
+        return NULL;
+    }
+    register_pointer(child_position_vector, TYPE_GSL_VECTOR);
+    position_tally(child_position_vector, (*child_fission_bank_double_pointer), child_neutron);
+
     return flux;
 } 
 
@@ -274,7 +299,7 @@ double determine_direction_and_distance(void) {
 }
 
 // Simulate fission
-void fission(neutron *parent_fission_bank, int *fission_neutrons, double k) {
+void fission(FILE *file2, neutron *parent_fission_bank, int *fission_neutrons, double k) {
     double init_weight = parent_fission_bank[parent_neutron].weight; // Weight of the parent neutron before collision
     double abs_init_weight = fabs(init_weight); // Absolute value of init_weight
     double R = abs_init_weight * nu * (sigma_f/(sigma_s + sigma_c + sigma_f)) * (1/k); 
@@ -283,10 +308,20 @@ void fission(neutron *parent_fission_bank, int *fission_neutrons, double k) {
 
     if (random_number < R - n) { // n+1 new neutrons are produced
         (*fission_neutrons) = n+1;
+
+        for (int i = 0; i < (*fission_neutrons); i++) {
+            fprintf(file2, "FISSION!!\n");
+        }
     }
     else { // n new neutrons are produced
         (*fission_neutrons) = n;
+
+        for (int i = 0; i < (*fission_neutrons); i++) {
+            fprintf(file2, "FISSION!!\n");
+        }
     }
+
+    fprintf(file2, "init_weight: %f, abs_init_weight: %f, k: %f R: %f, n: %d, rand: %f, fission_neutrons: %d\n\n", init_weight, abs_init_weight, k, R, n, random_number, (*fission_neutrons));
 }
 
 // Add fission-produced neutrons to the fission bank
@@ -342,6 +377,25 @@ void flux_tally(gsl_vector *flux, neutron *fission_bank_pointer, double position
 
     double current_value = gsl_vector_get(flux, bin_number); // Current value of the flux vector at bin_number element
     gsl_vector_set(flux, bin_number, current_value + (1/(sigma_s + sigma_c + sigma_f)) * fission_bank_pointer[parent_neutron].weight); // Set element at index bin_number of the flux vector to current_value +1/(sigma_s + sigma_c + sigma_f)
+}
+
+// Update the matrix tally for collision
+void matrix_tally(double weight, double neutrons, gsl_matrix *matrix, double new_position, double position) {
+    int bin_number1 = (int)floor(position/((width)/num_bins)); // bin_number1에 있는 parent neutron
+    int bin_number2 = (int)floor(new_position/((width)/num_bins)); // bin_number2에 있는 child neutron
+    if (bin_number1 < 0) {
+        printf("Neutron is out of bin range.\n");
+        bin_number1 = 0;
+    }
+    if (bin_number2 < 0) {
+        printf("Neutron is out of bin range.\n");
+        bin_number2 = 0;
+    }
+    if (bin_number1 == num_bins) bin_number1 = num_bins - 1; 
+    if (bin_number2 == num_bins) bin_number2 = num_bins - 1;
+
+    double current_value = gsl_matrix_get(matrix, bin_number2, bin_number1); 
+    gsl_matrix_set(matrix, bin_number2, bin_number1, current_value + weight * neutrons); 
 }
 
 // Force scattering
@@ -432,6 +486,24 @@ void reweight_neutrons(int condition, neutron **child_fission_bank_double_pointe
 
         for (int i = 1; i < child_neutron + 1; i++) {
             (*child_fission_bank_double_pointer)[i].weight = renormalize;
+        }
+    }
+}
+
+// Scale each column of the matrix
+void scale_columns(gsl_matrix *matrix, gsl_vector *vector) {
+    if (matrix == NULL || vector == NULL) {
+        printf("Null pointer passed to scale_columns function.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (size_t j = 0; j < num_bins; j++) {
+        double col_sum = gsl_vector_get(vector, j);
+        if (fabs(col_sum) > 1e-10) {
+            for (size_t i = 0; i < num_bins; i++) {
+                double normalized_value = gsl_matrix_get(matrix, i, j)/col_sum;
+                gsl_matrix_set(matrix, i, j, normalized_value);
+            }
         }
     }
 }

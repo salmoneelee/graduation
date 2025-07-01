@@ -1,7 +1,0 @@
-Boundary condition (zero = vacuum, one = reflective): 0
-Number of neutrons: 100000
-Total number of inactive cycles: 50
-Total number of active cycles: 500
-Particle name: electron
-Particle mass (SI unit): 9.10938e-31
-Potential (SI unit): 0

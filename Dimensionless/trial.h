@@ -50,6 +50,7 @@ typedef enum {
     TYPE_FILE,
     TYPE_CALLOC,
     TYPE_GSL_VECTOR,
+    TYPE_GSL_MATRIX,
     TYPE_RNG
 } pointertype;
 
@@ -63,15 +64,18 @@ void free_rng(void);
 
 void initialize_fission_bank(neutron **, int *);
 
-gsl_vector *simulate_neutron_diffusion(neutron *, neutron **, double *, double);
+gsl_vector *simulate_neutron_diffusion(FILE *, neutron *, neutron **, double *, double, gsl_matrix *);
 double determine_direction_and_distance(void);
-void fission(neutron *, int *, double);
+void fission(FILE *, neutron *, int *, double);
 void add_fission_bank(double, int, neutron **, double);
 void k_tally(double *, neutron *);
 void flux_tally(gsl_vector *, neutron *, double);
+void matrix_tally(double, double, gsl_matrix *, double, double);
 void force_scattering(neutron *);
 void russian_roulette(neutron *);
 void reweight_neutrons(int, neutron **);
+
+void scale_columns(gsl_matrix *, gsl_vector *); 
 
 void position_tally(gsl_vector *, neutron *, int);
 void sum_of_weights(neutron *, double *, int);

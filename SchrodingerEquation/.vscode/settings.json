@@ -1,6 +1,0 @@
-{
-    "files.associations": {
-        "math.h": "c",
-        "gsl_rng.h": "c"
-    }
-}

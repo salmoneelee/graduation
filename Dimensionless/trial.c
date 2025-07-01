@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <gsl/gsl_vector.h>
+#include <gsl/gsl_matrix.h>
 #include "trial.h"
 #include <math.h>
 #include <time.h>
@@ -10,7 +11,8 @@ int main() {
     int M; // Total number of cycles (inactive + active)
     int active_cycle; // Number of active cycles 
     int inactive_cycle; // Number of inactive cycles
-    char particle_name[100];
+    char particle_name[100]; // Name of the particle
+    double scaling_factor; // Scaling factor 
 
     neutron *parent_fission_bank = NULL; // Pointer to the parent fission bank (stack)
     neutron *child_fission_bank = NULL; // Pointer to the child fission bank (stack)
@@ -22,18 +24,36 @@ int main() {
     
     const char *input = "input.txt"; // File for reading the inputs
     const char *filename1 = "flux_data.txt"; // File for storing neutron flux data
+    const char *filename2 = "text_data.txt"; // File for storing data of each cycle
+    const char *filename3 = "position_data.txt"; // File for storing neutron position data
+    const char *filename4 = "reweight_bank.txt"; // File for storing reweight data of the child fission bank 
+    const char *filename5 = "k_data.txt"; // File for storing k data of each cycle
+    const char *filename6 = "E_data.txt"; // File for storing E data of each cycle
+    const char *filename7 = "fission_matrix.txt"; // File for storing the final fission matrix data
 
     // Register cleanup function
-    atexit(cleanup); 
+    atexit(cleanup);
 
     // Open text files
     FILE *input_file = fopen(input, "r");
     FILE *file1 = fopen(filename1, "w");
-    if(input_file == NULL || file1 == NULL) {
+    FILE *file2 = fopen(filename2, "w");
+    FILE *file3 = fopen(filename3, "w");
+    FILE *file4 = fopen(filename4, "w");
+    FILE *file5 = fopen(filename5, "w");
+    FILE *file6 = fopen(filename6, "w");
+    FILE *file7 = fopen(filename7, "w");
+    if(input_file == NULL || file1 == NULL || file2 == NULL || file3 == NULL || file4 == NULL || file5 == NULL || file6 == NULL || file7 == NULL) {
         printf("Unable to open files.\n");
         exit(EXIT_FAILURE); // Terminate program immediatedly
     }
     register_pointer(file1, TYPE_FILE);
+    register_pointer(file2, TYPE_FILE);
+    register_pointer(file3, TYPE_FILE);
+    register_pointer(file4, TYPE_FILE);
+    register_pointer(file5, TYPE_FILE);
+    register_pointer(file6, TYPE_FILE);
+    register_pointer(file7, TYPE_FILE);
 
     // Read input_file
     char buffer[100]; // Buffer to store each line read from the file 
@@ -51,6 +71,8 @@ int main() {
     sscanf(buffer, "%*[^:]: %lf", &particle_mass);
     fgets(buffer, sizeof(buffer), input_file);
     sscanf(buffer, "%*[^:]: %lf", &potential);
+    fgets(buffer, sizeof(buffer), input_file);
+    sscanf(buffer, "%*[^0-9]%lf", &scaling_factor);
 
     // Close input_file
     fclose(input_file); // close input_file
@@ -122,7 +144,7 @@ int main() {
     initialize_rng();
 
     // Initialize cross sections
-    sigma_t = (2/(3*width))*1.0e10;
+    sigma_t = (2/(3*width))*scaling_factor;
 
     double r;
     if (potential == 0) {
@@ -132,7 +154,7 @@ int main() {
         sigma_a = r * sigma_t;
     }
     else {
-        sigma_a = ((particle_mass*width/(h_bar*h_bar))*potential)*(1.0/1.0e10);
+        sigma_a = ((particle_mass*width/(h_bar*h_bar))*potential)*(1.0/scaling_factor);
     }
     sigma_s = sigma_t - sigma_a;
 
@@ -147,6 +169,7 @@ int main() {
         do {
             r = random_number_generator(); 
         } while (r == 0); 
+
         if (potential == 0) {
             sigma_a = r * sigma_t;
         }
@@ -160,6 +183,7 @@ int main() {
         } while (r == 0); 
         sigma_c = r * sigma_a;
         sigma_f = sigma_a - sigma_c;
+        sigma_s = sigma_t - sigma_a;
     }
 
     // Print input data 
@@ -170,9 +194,10 @@ int main() {
     printf("Total number of cycles: %d\n", M);
     printf("Number of inactive cycles: %d\n", inactive_cycle);
     printf("Number of active cycles: %d\n", active_cycle);
-    printf("Particle name: %s\n", particle_name);
+    printf("Particle: %s\n", particle_name);
     printf("Particle mass (g): %.5e\n", particle_mass);
     printf("Potential (g*cm^2/s) : %.5e\n", potential);
+    printf("Scaling factor : %.5e\n", scaling_factor);
     printf("===========================================================\n");
     printf("sigma_t = %f\n", sigma_t);
     printf("sigma_a = %f\n", sigma_a);
@@ -233,16 +258,31 @@ int main() {
     // Free initial_neutron_flux
     gsl_vector_free(initial_neutron_flux);
 
+    // Log initial parent neutron positions
+    fprintf(file2, "initial parent neutron numbers : %d\n", parent_neutron);
+    for(int i = 0; i < N+1; i++) {
+        fprintf(file2, "%dth neutron: %f \n", i+1, parent_fission_bank[i].position);
+    }
+
+    // Log the start of the simulation
+    fprintf(file2, "\n----------- starting simulation -----------\n");
     // Debug End
 
     // Simulate over M cycles
-    double k = 1.0; // Initial k value for scaling
+    double k = 1.0; // Initial k value for scaling => nu*simga_f/sigma_a 로 시작해보기 
     double k_sum = 0.0; // Accumulated sum of k values
     double k_squared_sum = 0.0; // Accumulated sum of the squares of k values
 
     double k_average; // Average of k values over all cycles
     double k_squared_average; // Average of squared k values over all cycles
     double k_sample_standard_deviation; // Sample standard deviation of k values over all cycles
+
+    double E_sum = 0.0; // Accumulated sum of E values
+    double E_squared_sum = 0.0; // Accumulated sum of the squares of E values
+
+    double E_average; // Average of E values over all cycles
+    double E_squared_average; // Average of squared E values over all cycles
+    double E_sample_standard_deviation; // Sample standard deviation of E values over all cycles
 
     gsl_vector *neutron_flux_sum = gsl_vector_calloc(num_bins); // Vector accumulating the sum of neutron flux values over all cycles
     gsl_vector *neutron_flux_squared_sum = gsl_vector_calloc(num_bins); // Vector accumulating the sum of the square of neutron flux values over all cycles
@@ -253,16 +293,42 @@ int main() {
     register_pointer(neutron_flux_sum, TYPE_GSL_VECTOR);
     register_pointer(neutron_flux_squared_sum, TYPE_GSL_VECTOR);
 
+    gsl_vector *initial_position_vector = gsl_vector_calloc(num_bins); // Vector tracking the initial positions of parent neutrons across cycles
+    if (initial_position_vector == NULL) {
+        printf("Memory allocation failed for the initial position vector.\n");
+        exit(EXIT_FAILURE); 
+    }
+    register_pointer(initial_position_vector, TYPE_GSL_VECTOR);
+
+    gsl_matrix *A_sum = gsl_matrix_calloc(num_bins, num_bins); // Matrix to store the sum of all A matrices over all cycles
+    if (A_sum == NULL) {
+        printf("Memory allocation failed for A_sum matrix.\n");
+        exit(EXIT_FAILURE);
+    }
+    register_pointer(A_sum, TYPE_GSL_MATRIX);
+
     for(int i = 0; i < M; i++) {
         double k_cycle = 0.0; // k value for a single cycle
         double *k_pointer = &k_cycle; // Pointer to k_cycle 
         int size_of_fb = parent_neutron; // Number of neutrons in parent_fission_bank
         double total_weight = 0.0; // Total weight of parent neutrons for a single cycle 
 
+        gsl_matrix *A = gsl_matrix_calloc(num_bins, num_bins); // matrix A storing data for each cycle
+        if (A == NULL) {
+            printf("Memory allocation failed for matrix A.\n");
+            exit(EXIT_FAILURE); 
+        }
+        register_pointer(A, TYPE_GSL_MATRIX);
+
         sum_of_weights(parent_fission_bank, &total_weight, parent_neutron); // Total sum of neutron weights in parent_fission_bank
-        
+        position_tally(initial_position_vector, parent_fission_bank, parent_neutron); // Tally positions of parent neutrons into initial_position_vector
+
+        // Log total weight of parent neutrons before simulation
+        fprintf(file2, "----------- cycle# = %d, size of fb = %d -----------\n", i+1, size_of_fb);
+        fprintf(file2, "total weight = %f\n", total_weight);
+
         // Simulate parent fission bank
-        gsl_vector *neutron_flux = simulate_neutron_diffusion(parent_fission_bank, child_fission_bank_double_pointer, k_pointer, k);
+        gsl_vector *neutron_flux = simulate_neutron_diffusion(file2, parent_fission_bank, child_fission_bank_double_pointer, k_pointer, k, A);
         if (neutron_flux == NULL) {
             printf("Memory allocation failed for neutron flux.\n");
             exit(EXIT_FAILURE);
@@ -273,6 +339,9 @@ int main() {
         k_cycle /= total_weight; // k value for a single cycle
         gsl_vector_scale(neutron_flux, 1.0/(size_of_fb*(width/(double)num_bins))); // Neutron flux for one cycle per neutron per width of bin
 
+        // Accumulate matrix A over all cycles
+        gsl_matrix_add(A_sum, A); // A_sum += A
+
         // Debug Start: Logging neutron flux, k values, matrices, and fission bank data after the simulation 
         // Log neutron flux values
         fprintf(file1, "----------- cycle# = %d -----------\n", i+1);
@@ -280,10 +349,27 @@ int main() {
             fprintf(file1, "%f %g\n", (width/(2.0*num_bins))+i*(width/num_bins), gsl_vector_get(neutron_flux, i));
         }
 
+        // Log parent and child fission bank size
+        fprintf(file2, "++++++++++++++++++++++++++++++++++++++\n");
+        fprintf(file2, "size of fb, before / after = %d, %d\n", size_of_fb, child_neutron);
+        fprintf(file2, "k_cycle = %10.5f\n", k_cycle);
+        fprintf(file2, "++++++++++++++++++++++++++++++++++++++\n\n");
+        // Debug End
+
         // Accumulate k value only for active cycles
         if (i >= inactive_cycle) {
             k_sum += k_cycle;
             k_squared_sum += k_cycle * k_cycle;
+
+            if (potential == 0) {
+                double temp = ((nu*sigma_f/k_cycle)-sigma_a)*(h_bar*h_bar/(particle_mass * width))*scaling_factor;
+                E_sum += temp;
+                E_squared_sum += temp * temp;
+            } else {
+                double temp = ((nu * sigma_f * h_bar * h_bar)/(particle_mass * width * k_cycle))*scaling_factor;
+                E_sum += temp;
+                E_squared_sum += temp * temp;
+            }
 
             gsl_vector_add(neutron_flux_sum, neutron_flux); // neutron_flux_sum += neutron_flux
             gsl_vector_mul(neutron_flux, neutron_flux); // neutron_flux *= neutron_flux
@@ -292,6 +378,7 @@ int main() {
 
         // Terminate program if child fission bank is empty (no neutrons left)
         if (child_neutron == 0) {
+            fprintf(file2, "Fission bank is empty\n");
             printf("Fission bank is empty\n");
             exit(EXIT_FAILURE);
         } 
@@ -314,6 +401,7 @@ int main() {
 
         // Free neutron flux and matrix A
         unregister_pointer(neutron_flux);
+        unregister_pointer(A);
     }
 
     // Calculate the mean and standard deviation of the neutron flux
@@ -341,29 +429,28 @@ int main() {
         gsl_vector_set_all(neutron_flux_squared_sum, 0.0);
     }
 
-    // Calculate the mean and standard deviation of the k value
+    // Calculate the mean and standard deviation of the k value and energy
     k_average = k_sum/active_cycle;
     k_squared_average = k_squared_sum/active_cycle;
+    E_average = E_sum/active_cycle;
+    E_squared_average = E_squared_sum/active_cycle;
 
     // Compute sample standard deviation using Bessel's correction
     if (active_cycle > 1) {
         k_sample_standard_deviation = sqrt((k_squared_average - k_average * k_average) / (active_cycle - 1));
+        E_sample_standard_deviation = sqrt((E_squared_average - E_average * E_average) / (active_cycle - 1));
     } else {
-        printf("Cannot calculate the sample standard deviation of k. The number of active cycles must be greater than 1.\n");
+        printf("Cannot calculate the sample standard deviation of k and E. The number of active cycles must be greater than 1.\n");
         k_sample_standard_deviation = 0.0; 
+        E_sample_standard_deviation = 0.0; 
     }
+
+    // Calculate the fission matrix
+    scale_columns(A_sum, initial_position_vector);
 
     // Calculate the theoretical and simulated ground state energy of the particle
     //double E_theoretical = (h_bar*h_bar*PI*PI)/(2*particle_mass*width*width); // infinite potential well 
     double E_theoretical = (h_bar*h_bar*PI*PI)/(2*particle_mass*width*width) + potential;
-
-    double E_simulated;
-    if (potential == 0) {
-        E_simulated = ((nu*sigma_f/k_average)-sigma_a)*1.0e10*(h_bar*h_bar/(particle_mass * width)); 
-    }
-    else {
-        E_simulated = ((nu * sigma_f * h_bar * h_bar)/(particle_mass * width * k_average))*1.0e10;
-    }
 
     // Debug Start: Logging final neutron flux, k values, and fission matrix
     // Log mean and standard deviation of neutron flux
@@ -377,23 +464,39 @@ int main() {
     }
     
     // Log mean and standard deviation of k, theoretical k values for the first and second harmonic modes
+    fprintf(file2, "k_avg=%f, k_sa=%f, std=%f\n", k_average, k_squared_average, k_sample_standard_deviation);
+    fprintf(file2, "k1=%f, k2=%f, k2/k1=%f\n", k1, k2, k2/k1);
+    fprintf(file2, "E_avg=%f, E_sa=%f, std=%f\n", E_average, E_squared_average, E_sample_standard_deviation);
+    fprintf(file2, "E_theoretical=%f\n", E_theoretical);
+
     printf("===========================================================\n");
     printf("Theoretical values: k1=%f, k2=%f, k2/k1=%f\n", k1, k2, k2/k1);
-    printf("Simulated values: k_a=%f, k_sa=%f, std=%f\n", k_average, k_squared_average, k_sample_standard_deviation);
-    printf("Theoretical ground state enegry: %e\n", E_theoretical); 
-    printf("Simulated ground state enegry: %e\n", E_simulated);
+    printf("Simulated values: k_avg=%f, k_sa=%f, std=%f\n", k_average, k_squared_average, k_sample_standard_deviation);
+    printf("Theoretical ground state enegry: %e\n", E_theoretical);
+    printf("Simulated ground state enegry: E_avg=%0.5e, E_sa=%f, std=%f\n", E_average, E_squared_average, E_sample_standard_deviation);
     printf("===========================================================\n");
-    // Debug End
 
     // Save simulated ground state energy to a file
-    FILE *energy_file = fopen("energy_results.txt", "a");
+    FILE *energy_file = fopen("electron_infinite.txt", "a");
     if (energy_file == NULL) {
-        printf("Unable to open energy_results.txt for writing.\n");
+        printf("Unable to open electron_infinite.txt for writing.\n");
         exit(EXIT_FAILURE);
     }
-    fprintf(energy_file, "sigma_s: %f, sigma_c: %f, simga_f: %f, k1: %f, ka: %f, std: %f, energy: %e\n", 
-        sigma_a, sigma_c, sigma_f, k1, k_average, k_sample_standard_deviation, E_simulated);
+    fprintf(energy_file, "sigma_s: %f, sigma_c: %f, simga_f: %f, k1: %f, k_avg: %f, std: %f, E_avg: %0.5e, E_sa: %0.5e, std: %0.5e\n", 
+        sigma_s, sigma_c, sigma_f, k1, k_average, k_sample_standard_deviation, E_average, E_squared_average, E_sample_standard_deviation);
     fclose(energy_file);
+    // Debug End
+
+    // Log fission matrix
+    for (size_t i = 0; i < A_sum ->size1; i++) {
+        for (size_t j = 0; j < A_sum ->size2; j++) {
+            fprintf(file7, "%.5f ", gsl_matrix_get(A_sum, i, j));
+            printf("%.5f ", gsl_matrix_get(A_sum, i, j));
+        }
+        fprintf(file7, "\n");
+        printf("\n");
+    }
+   // Debug End
 
     // Cleanup
     return 0;
