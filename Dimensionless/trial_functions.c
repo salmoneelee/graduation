@@ -3,20 +3,25 @@
 #include <time.h>
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_vector.h>
-#include "trial8.h"
+#include "trial.h"
 #include <math.h>
 #include <string.h>
 
 int N; // Total number of neutrons
 int boundary_condition; // Boundary condition (0 = vacuum, 1 = reflective)
 
-const double width = 20.0; // Width of the reactor
+const double width = 20.0; // Width of the reactor [cm]
 const int num_bins = 20; // Number of bins in the reactor
-
-const double sigma_s = 0.153975; // Scattering cross section 0.1
-const double sigma_c = 0.126561; // Capture cross section 0.07
-const double sigma_f = 0.019464; // Fission cross section 0.06
 const double nu = 2.43; // Average number of neutrons produced per fission
+
+double potential; // Potential of the reactor [g*cm^2/s^2]
+
+double particle_mass; // Mass of particle [g]
+double sigma_t; // Total cross section
+double sigma_a; // Absorption cross section 
+double sigma_s; // Scattering cross section
+double sigma_c; // Capture cross section
+double sigma_f; // Fission cross section
 
 int parent_neutron = 0; // Number of neutrons in the parent fission bank
 int child_neutron = 0; // Number of neutrons in the child fission bank
@@ -186,7 +191,7 @@ void sum_of_weights(neutron *fission_bank, double *total_weight_pointer, int neu
 }
 
 // Simulate neutron diffusion for one cycle
-gsl_vector *simulate_neutron_diffusion(FILE *file2, neutron *parent_fission_bank, neutron **child_fission_bank_double_pointer, double *k_pointer, double k) {
+gsl_vector *simulate_neutron_diffusion(neutron *parent_fission_bank, neutron **child_fission_bank_double_pointer, double *k_pointer, double k) {
     gsl_vector *flux = gsl_vector_calloc(num_bins); 
     if (flux == NULL) {
         printf("Memory allocation for flux failed.\n");
@@ -194,22 +199,14 @@ gsl_vector *simulate_neutron_diffusion(FILE *file2, neutron *parent_fission_bank
     }
 
     while (parent_fission_bank[parent_neutron].position != -1.0) {
-        double initial_position = parent_fission_bank[parent_neutron].position;
         double distance = determine_direction_and_distance(); // Distance to the next collision
         double new_position = parent_fission_bank[parent_neutron].position + distance;  // New position for the neutron
         parent_fission_bank[parent_neutron].position = new_position;
 
-        // Debug Start: Logging simulation step
-        fprintf(file2, "---- simulating neutron# %d ----\n ", parent_neutron);
-        fprintf(file2, "weight: %f, pos: %f, dis: %f, ", parent_fission_bank[parent_neutron].weight, initial_position, distance);
-        // Debug End
-
         int fission_neutrons = 0; // Number of neutrons produced by fission
         double child_weight = k; // Weight of child neutron
         if (new_position < width && new_position > 0) {
-            fprintf(file2, "newpos: %f\n", new_position);
-
-            fission(file2, parent_fission_bank, &fission_neutrons, k); // Number of neutrons produced by fission
+            fission(parent_fission_bank, &fission_neutrons, k); // Number of neutrons produced by fission
             if (parent_fission_bank[parent_neutron].weight < 0) {
                 child_weight = -k; 
             }
@@ -241,7 +238,6 @@ gsl_vector *simulate_neutron_diffusion(FILE *file2, neutron *parent_fission_bank
             }
 
             parent_fission_bank[parent_neutron].position = new_position;
-            fprintf(file2, "newpos: %f\n", new_position);
 
             if (boundary_condition == 0) { // Vacuum
                 parent_fission_bank[parent_neutron].weight *= -1; // Negative weight neutron
@@ -250,7 +246,7 @@ gsl_vector *simulate_neutron_diffusion(FILE *file2, neutron *parent_fission_bank
                 }
             }
 
-            fission(file2, parent_fission_bank, &fission_neutrons, k); 
+            fission(parent_fission_bank, &fission_neutrons, k); 
             add_fission_bank(child_weight, fission_neutrons, child_fission_bank_double_pointer, new_position);
             
             k_tally(k_pointer, parent_fission_bank);
@@ -278,7 +274,7 @@ double determine_direction_and_distance(void) {
 }
 
 // Simulate fission
-void fission(FILE *file2, neutron *parent_fission_bank, int *fission_neutrons, double k) {
+void fission(neutron *parent_fission_bank, int *fission_neutrons, double k) {
     double init_weight = parent_fission_bank[parent_neutron].weight; // Weight of the parent neutron before collision
     double abs_init_weight = fabs(init_weight); // Absolute value of init_weight
     double R = abs_init_weight * nu * (sigma_f/(sigma_s + sigma_c + sigma_f)) * (1/k); 
@@ -287,20 +283,10 @@ void fission(FILE *file2, neutron *parent_fission_bank, int *fission_neutrons, d
 
     if (random_number < R - n) { // n+1 new neutrons are produced
         (*fission_neutrons) = n+1;
-
-        for (int i = 0; i < (*fission_neutrons); i++) {
-            fprintf(file2, "FISSION!!\n");
-        }
     }
     else { // n new neutrons are produced
         (*fission_neutrons) = n;
-
-        for (int i = 0; i < (*fission_neutrons); i++) {
-            fprintf(file2, "FISSION!!\n");
-        }
     }
-
-    fprintf(file2, "init_weight: %f, abs_init_weight: %f, k: %f R: %f, n: %d, rand: %f, fission_neutrons: %d\n\n", init_weight, abs_init_weight, k, R, n, random_number, (*fission_neutrons));
 }
 
 // Add fission-produced neutrons to the fission bank
@@ -384,8 +370,8 @@ void russian_roulette(neutron *parent_fission_bank) {
 }
 
 // Reweight child neutrons to conserve the total weight of each cycles 
-void reweight_neutrons(FILE *file4, int condition, neutron **child_fission_bank_double_pointer) {
-    if (file4 == NULL || child_fission_bank_double_pointer == NULL || *child_fission_bank_double_pointer == NULL) {
+void reweight_neutrons(int condition, neutron **child_fission_bank_double_pointer) {
+    if (child_fission_bank_double_pointer == NULL || *child_fission_bank_double_pointer == NULL) {
         printf("Null pointer passed to reweight_neutrons function.\n");
         exit(EXIT_FAILURE);
     }
@@ -399,13 +385,6 @@ void reweight_neutrons(FILE *file4, int condition, neutron **child_fission_bank_
             exit(EXIT_FAILURE);
         }
         double renormalize = N/total_weight;
-
-        fprintf(file4, "----------- child before reweight -----------\n");
-        fprintf(file4, "total_weight: %f\n", total_weight); 
-        for (int i = 1; i < child_neutron + 1; i++) {
-            fprintf(file4, "%d %0.10f %0.10f\n", i, (*child_fission_bank_double_pointer)[i].position, (*child_fission_bank_double_pointer)[i].weight); 
-        }
-        fprintf(file4, "\n");
         
         gsl_vector *neutron_position_data = gsl_vector_calloc(num_bins); 
         if (neutron_position_data == NULL) {
@@ -436,9 +415,6 @@ void reweight_neutrons(FILE *file4, int condition, neutron **child_fission_bank_
         for (int j = 0; j < num_bins; j++){
             double total_neutrons = gsl_vector_get(neutron_position_data, j); 
 
-            fprintf(file4, "bin_num: %d, total_neutrons: %f\n", j, total_neutrons);
-            fprintf(file4, "bin_num: %d, negative_neutrons: %d\n", j, negative[j]);
-
             double weight = (total_neutrons - 2 * negative[j])/total_neutrons;
             for (int i = 1; i < child_neutron + 1; i++) {
                 if ((*child_fission_bank_double_pointer)[i].position >= j*(width/num_bins) && (*child_fission_bank_double_pointer)[i].position < (j+1) * (width/num_bins)) {
@@ -450,31 +426,12 @@ void reweight_neutrons(FILE *file4, int condition, neutron **child_fission_bank_
 
         total_weight = 0.0;
         sum_of_weights((*child_fission_bank_double_pointer), &total_weight, child_neutron);
-
-        fprintf(file4, "----------- child after reweight -----------\n");
-        fprintf(file4, "total_weight: %f\n", total_weight); 
-        for (int i = 1; i < child_neutron + 1; i++) {
-            fprintf(file4, "%d %0.10f %0.10f\n", i, (*child_fission_bank_double_pointer)[i].position, (*child_fission_bank_double_pointer)[i].weight); 
-        }
     }
     else {
         double renormalize = (double)N/child_neutron;
 
-        fprintf(file4, "----------- child before reweight -----------\n");
-        fprintf(file4, "total_weight: %f\n", total_weight); 
-        for (int i = 1; i < child_neutron + 1; i++) {
-            fprintf(file4, "%d %0.10f %0.10f\n", i, (*child_fission_bank_double_pointer)[i].position, (*child_fission_bank_double_pointer)[i].weight); 
-            }
-        fprintf(file4, "\n");
-
         for (int i = 1; i < child_neutron + 1; i++) {
             (*child_fission_bank_double_pointer)[i].weight = renormalize;
-        }
-
-        fprintf(file4, "----------- child after reweight -----------\n");
-        fprintf(file4, "total_weight: %f\n", total_weight); 
-        for (int i = 1; i < child_neutron + 1; i++) {
-            fprintf(file4, "%d %0.10f %0.10f\n", i, (*child_fission_bank_double_pointer)[i].position, (*child_fission_bank_double_pointer)[i].weight); 
         }
     }
 }
