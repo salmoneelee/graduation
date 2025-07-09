@@ -4,6 +4,9 @@ This repository contains code from my undergraduate thesis project at SKKU, wher
 
 ### Folders
 
+- `STATUS_REPORTS/`  
+Presentations for monthly status reports on project progress.
+
 - `Dimensionless/`  
   Code for mapping physical quantities (potential, mass) to cross sections and interpreting the simulated k-value as the ground state energy using a dimensionless formulation.
 
